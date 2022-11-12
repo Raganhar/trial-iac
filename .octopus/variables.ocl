@@ -1,0 +1,10 @@
+variable "bob" {
+    value "lol" {
+        environment = ["development"]
+    }
+
+    value "bobsilol" {
+        description = ""
+        environment = ["production"]
+    }
+}

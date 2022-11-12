@@ -1,0 +1,151 @@
+name: .NET
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches: 
+      - master
+
+jobs:
+  generate_version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.generated-version.outputs.VERSION }}
+      branchName: ${{ steps.gitversion.outputs.branchName }}
+    steps:
+    - name: Checkout the repository
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: Install GitVersion
+      uses: gittools/actions/gitversion/setup@v0.9.7
+      with:
+        versionSpec: '5.8.1'
+    
+    - name: Determine Version 
+      id:   gitversion
+      uses: gittools/actions/gitversion/execute@v0.9.7
+    
+    - name: Display GitVersion outputs
+      id: generated-version
+      run: |
+        echo "::set-output name=VERSION::${{ steps.gitversion.outputs.semVer }}.$GITHUB_RUN_NUMBER-${{ steps.gitversion.outputs.shortSha }}"
+    
+    - name: Validate the GitVersion
+      id: validate-version
+      shell: pwsh
+      run: |
+        if ("${{ steps.gitversion.outputs.branchName }}" -like 'release/*') {
+          echo "::set-output name=VERSION::${{ steps.generated-version.outputs.VERSION }}"
+        }
+        else {
+          $version = "${{ steps.generated-version.outputs.VERSION }}" -replace '-beta', ''
+          echo "::set-output name=VERSION::$version" 
+        }
+
+
+  build_docker_image:
+    runs-on: ubuntu-latest
+    needs: "generate_version"
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+      with:
+          fetch-depth: 0
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+
+    - id: "lower_repo"
+      uses: ASzc/change-string-case-action@v2
+      with:
+        string: ${{ github.event.repository.name }}
+
+    - name: Authenticate with the Github Container Registry 🔐
+      run: echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u USERNAME --password-stdin
+
+    - name: Build and push docker image 🏗 📦
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        file: Dockerfile
+        platforms: linux/amd64
+        push: true
+        tags: ghcr.io/raganhar/${{steps.lower_repo.outputs.lowercase}}:${{ needs.generate_version.outputs.version }}
+          
+  release_to_octopus_deploy:
+    runs-on: ubuntu-latest
+    needs: 
+      - "generate_version"
+      - "build_docker_image"
+    steps:
+    - uses: actions/checkout@v3
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v2
+      with:
+        dotnet-version: 6.0.x
+    - name: Restore dependencies
+      run: dotnet restore
+    # - name: Build
+    #   run: dotnet build --no-restore
+    # - name: Test
+    #   run: dotnet test --no-build --verbosity normal
+    #   env: 
+    #     MYSQL__DATABASE: testing 
+    #     MYSQL__USER: root 
+    #     MYSQL__PASSWORD: root 
+    #     MYSQL__PORT: 33006
+    #     AppConfig__ASPNETCORE_ENVIRONMENT: development
+    #     AutoProffConfig__BaseUrl: "http://google.dk"
+
+#  api_key: ${{ secrets.OCTOPUSSERVERAPIKEY }}
+#     #     server: ${{ secrets.OCTOPUSSERVERURL }}
+
+
+    - name: Install Octopus CLI 🐙
+      uses: OctopusDeploy/install-octopus-cli-action@v1
+      with:
+          version: latest
+    # - name: Package artifacts for Octopus Deploy 📦  
+    #   run: >
+    #     octo pack --id="${{ github.event.repository.name }}" --format="zip" --version=${{ needs.generate_version.outputs.version }} --basePath="DockerWebAPI" --outFolder=".artifacts/nuget"
+    
+    # - name: Push a package to Octopus Deploy 📦 ➡ 🐙
+    #   uses: OctopusDeploy/push-package-action@v1.1.1
+    #   with:
+    #     api_key: ${{ secrets.OCTOPUSSERVERAPIKEY }}
+    #     packages: '.artifacts/nuget/${{ github.event.repository.name }}.${{ needs.generate_version.outputs.version }}.zip'
+    #     server: ${{ secrets.OCTOPUSSERVERURL }}
+    
+    # - name: Octopus Deploy Build Information
+    #   uses: xo-energy/action-octopus-build-information@v1.3.14
+    #   with:
+    #     octopus_api_key: ${{ secrets.OCTOPUSSERVERAPIKEY }}
+    #     octopus_server: ${{ secrets.OCTOPUSSERVERURL }}
+    #     octopus_project: "Container_web_api"
+    #     output_path: ./
+    #     push_package_ids: "${{ github.event.repository.name }}"
+    #     push_version: ${{ needs.generate_version.outputs.version }}
+    
+    # - name: Set Octopus Channel
+    #   id: octopus-channel
+    #   run: |
+    #     if ("${{ needs.generate_version.outputs.branchName }}" -like 'release/*') {
+    #         echo "::set-output name=OCTO_CHANNEL::Unstable" 
+    #     }
+    #     else {
+    #       echo "::set-output name=OCTO_CHANNEL::Release"
+    #     }
+
+    - name: Create a release in Octopus Deploy 🚀 ➡ 🐙
+      uses: OctopusDeploy/create-release-action@v1.1.1
+      with:
+        api_key: ${{ secrets.OCTOPUSSERVERAPIKEY }}
+        server: ${{ secrets.OCTOPUSSERVERURL }}
+        project: "Container_web_api"
+        release_number: ${{ needs.generate_version.outputs.version }}
+        packages: ${{ github.event.repository.name }}:${{ needs.generate_version.outputs.version }}
+        git_ref: master

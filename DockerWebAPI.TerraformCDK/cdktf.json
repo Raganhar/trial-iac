@@ -1,0 +1,12 @@
+{
+  "language": "csharp",
+  "app": "dotnet run -p DockerWebAPI.TerraformCDK.csproj",
+  "projectId": "9264ba09-23e9-4ee3-aadd-8d65ad662900",
+  "sendCrashReports": "false",
+  "terraformProviders": [],
+  "terraformModules": [],
+  "context": {
+    "excludeStackIdFromLogicalIds": "true",
+    "allowSepCharsInLogicalIds": "true"
+  }
+}
